@@ -9,7 +9,61 @@ import (
 	"time"
 	"os"
 	"github.com/HashCell/go-fileserver/util"
+	"encoding/json"
 )
+
+/**
+* update file meta, only support rename file
+ */
+func UpdateFileMetaHandler(w http.ResponseWriter, r *http.Request) {
+	// fetch file hash-key to find file-meta
+	r.ParseForm()
+
+	opType := r.Form.Get("op")
+	fileSha1 := r.Form.Get("filehash")
+	newFileName := r.Form.Get("filename")
+
+	if opType != "0" {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+
+	if r.Method != "POST" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	fileMeta := meta.GetFileMeta(fileSha1)
+	fileMeta.FileName = newFileName
+	meta.UpdateFileMeta(fileMeta)
+
+	data, err := json.Marshal(fileMeta)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
+}
+
+func DeleteFileHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+
+	fileSha1 := r.Form.Get("filehash")
+	fileMeta := meta.GetFileMeta(fileSha1)
+
+	//remove the file
+	err := os.Remove(fileMeta.Location)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	// remove file meta
+	meta.RemoveFileMeta(fileSha1)
+	// TODO: remove meta from database table
+
+	w.WriteHeader(http.StatusOK)
+}
 
 func UploadHandler(w http.ResponseWriter, req *http.Request) {
 
@@ -89,26 +143,5 @@ func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 	// attachment means the file will be downloaded to save, instead of displaying on browser
 	w.Header().Set("content-disposition","attachment;filename=\""+fileMeta.FileName+"\"")
 	w.Write(data)
-}
-
-/**
-* update file meta, only support rename file
- */
-func UpdateFileMetaHandler(w http.ResponseWriter, r *http.Request) {
-	// fetch file hash-key to find file-meta
-	r.ParseForm()
-
-	opType := r.Form.Get("op")
-	fileSha1 := r.Form.Get("filehash")
-	newFilename := r.Form.Get("filename")
-
-	if opType != "0" {
-		w.WriteHeader(http.StatusForbidden)
-	}
-
-}
-
-func DeleteFileHandler(w http.ResponseWriter, r *http.Request) {
-
 }
 
