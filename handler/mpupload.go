@@ -143,27 +143,21 @@ func CompleteUploadHandler(w http.ResponseWriter, r *http.Request) {
 		w.Write(util.NewRespMsg(-2, "invalid request", nil).JSONBytes())
 		return
 	}
-	//4. TODO:合并分块，得到完整的文件,使用linux shell脚本完成合并
+	//4. 合并分块，得到完整的文件,使用linux shell脚本完成合并
 	targetDir := "/data/file-server/files/"
 	targetFile := targetDir + filename
 	srcFile := "/data/"+uploadID
 	cmd := exec.Command("./script/shell/merge_file_blocks.sh", srcFile, targetFile)
-	err = cmd.Run()
-	if err != nil {
-		fmt.Println("cao " + err.Error())
+	if _, err := cmd.Output(); err != nil {
+		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
 		w.Write(util.NewRespMsg(-2, "fail", nil).JSONBytes())
 		return
+	} else {
+		fmt.Println(targetFile + " has been merged completely")
 	}
-	//use cmd.Output instead of cmd.Run() in order to check output error
-	//if _, err := cmd.Output(); err != nil {
-	//	fmt.Println(err.Error())
-	//	//os.Exit(1)
-	//	w.WriteHeader(http.StatusInternalServerError)
-	//	w.Write(util.NewRespMsg(-2, "fail", nil).JSONBytes())
-	//	return
-	//} else {
-	//	fmt.Println(targetFile + " has been merged completely")
-	//}
+	//4.1 TODO: 如果合并后的文件仍然存放在本地，则应该以uploadId区分文件目录
+	//	  TODO: 后面使用私有云或公有云，结合rabbitMQ异步地将该大文件转移到云上
 	//5. 更新唯一文件表和用户文件表
 	fsize, _ := strconv.Atoi(filesize)
 	//file address remains "" for future implement, such as ceph, oss
