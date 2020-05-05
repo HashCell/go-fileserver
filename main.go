@@ -33,6 +33,11 @@ func main() {
 	http.HandleFunc("/user/signin",handler.UserSigninHandler)
 	http.HandleFunc("/user/info",handler.UserInfoHandler)
 
+	// multipart upload
+	http.HandleFunc("/file/mpupload/init", handler.InitiateMultipartUploadHandler)
+	http.HandleFunc("/file/mpupload/split", handler.UploadPartHandler)
+	http.HandleFunc("/file/mpupload/complete", handler.CompleteUploadHandler)
+
 	//webRoot+"/static"绝对路径
 	//http://localhost:8080/static/view/signin.html trip掉/static，剩下/view/signin.html到webRoot+"/static目录去找
 	http.Handle("/static/",http.StripPrefix("/static/",http.FileServer(http.Dir(webRoot+"/static"))))
