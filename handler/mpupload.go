@@ -13,6 +13,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"github.com/HashCell/go-fileserver/db"
 	"strings"
+	"os/exec"
 )
 
 //分块初始化信息
@@ -52,6 +53,7 @@ func InitiateMultipartUploadHandler(w http.ResponseWriter, r *http.Request) {
 		ChunkSize:5 * 1024 * 1024, //5MB
 		ChunkCount: int(math.Ceil(float64(filesize) / (5 * 1024 * 1024))),
 	}
+	fmt.Println(mpInfo)
 
 	//4. 将初始化数据返回到客户端
 	redisConn.Do("HSET", "MP_"+mpInfo.UploadID, "chunkcount", mpInfo.ChunkCount)
@@ -73,14 +75,21 @@ func UploadPartHandler(w http.ResponseWriter, r *http.Request) {
 	defer redisConn.Close()
 
 	//3.　获取文件句柄，用于存储分块内容
-	fpath := "/data/"+uploadID+"/"+chunkIndex
-	os.MkdirAll(path.Dir(fpath), 0744)
+	fpath := "/data/" + uploadID + "/" + chunkIndex
+	fmt.Println(path.Dir(fpath))
+	err := os.MkdirAll(path.Dir(fpath), 0744)
+	if err != nil {
+		fmt.Println(err.Error())
+	}
 	fd, err := os.Create(fpath)
 	if err != nil {
+		fmt.Println(err.Error())
 		w.Write(util.NewRespMsg(-1, "Upload part failed", nil).JSONBytes())
 		return
 	}
 	defer fd.Close()
+
+	fmt.Println(fpath)
 
 	buf := make([]byte, 1024 * 1024)
 	for {
@@ -125,16 +134,36 @@ func CompleteUploadHandler(w http.ResponseWriter, r *http.Request) {
 		v := string(dataArr[i+1].([]byte))
 		if k == "chunkcount" {
 			totalCount, _ = strconv.Atoi(v)
-		} else if strings.HasPrefix(k, "chkindx_") && v == "1" {
+		} else if strings.HasPrefix(k, "chkidx_") && v == "1" {
 			chunkCount++
 		}
 	}
+	fmt.Println("total: ", totalCount, "chunkcount: ", chunkCount)
 	if totalCount != chunkCount {
 		w.Write(util.NewRespMsg(-2, "invalid request", nil).JSONBytes())
 		return
 	}
-	//4. TODO:合并分块，得到完整的文件,使用linux shell完成合并
-
+	//4. TODO:合并分块，得到完整的文件,使用linux shell脚本完成合并
+	targetDir := "/data/file-server/files/"
+	targetFile := targetDir + filename
+	srcFile := "/data/"+uploadID
+	cmd := exec.Command("./script/shell/merge_file_blocks.sh", srcFile, targetFile)
+	err = cmd.Run()
+	if err != nil {
+		fmt.Println("cao " + err.Error())
+		w.Write(util.NewRespMsg(-2, "fail", nil).JSONBytes())
+		return
+	}
+	//use cmd.Output instead of cmd.Run() in order to check output error
+	//if _, err := cmd.Output(); err != nil {
+	//	fmt.Println(err.Error())
+	//	//os.Exit(1)
+	//	w.WriteHeader(http.StatusInternalServerError)
+	//	w.Write(util.NewRespMsg(-2, "fail", nil).JSONBytes())
+	//	return
+	//} else {
+	//	fmt.Println(targetFile + " has been merged completely")
+	//}
 	//5. 更新唯一文件表和用户文件表
 	fsize, _ := strconv.Atoi(filesize)
 	//file address remains "" for future implement, such as ceph, oss
@@ -145,3 +174,12 @@ func CompleteUploadHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(util.NewRespMsg(0, "OK", nil).JSONBytes())
 }
 
+//取消分块上传
+func CancelMultipartUpload(w http.ResponseWriter, r *http.Request) {
+
+}
+
+//查看分块上传的状态
+func MultipartUploadStatusHandler(w http.ResponseWriter, r *http.Request) {
+
+}
