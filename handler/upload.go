@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"github.com/HashCell/go-fileserver/db"
 	"strings"
+	"github.com/HashCell/go-fileserver/store/oss"
 )
 
 /**
@@ -162,9 +163,29 @@ func UploadHandler(w http.ResponseWriter, req *http.Request) {
 		// save the file meta
 		fileMeta.FileSha1 = util.FileSha1(newFile)
 		//meta.UpdateFileMeta(fileMeta)
+
+		newFile.Seek(0,0)
+		//data, _ := ioutil.ReadAll(newFile)
+		////写入到ceph集群
+		//bucket := ceph.GetCephBucket("userfile")
+		//cephPath := "/ceph/" + fileMeta.FileSha1
+		//bucket.Put(cephPath,data,"octet-stream",s3.PublicRead)
+		//fileMeta.Location = cephPath
+
+		// 上传到阿里云oss
+		//为了方便在阿里云预览文件，将文件名带上从而带上具体文件格式
+		// ossPath中的文件路径将会在阿里云oss创建，path不要以 / 开头
+		ossPath := "oss/" + fileMeta.FileSha1 + "_" + fileMeta.FileName
+		err = oss.Bucket().PutObject(ossPath, newFile)
+		if err != nil {
+			fmt.Println(err.Error())
+			w.Write([]byte("oss upload fail"))
+			return
+		}
+		fileMeta.Location = ossPath
+
 		// 写入到文件表
 		meta.UpdateFileMetaDB(fileMeta)
-
 		//由于引入了秒传功能，所以还需要更新用户文件表
 		req.ParseForm()
 		username := req.Form.Get("username")
@@ -221,13 +242,20 @@ func DownloadURLHandler(w http.ResponseWriter, r *http.Request) {
 	// 从文件表查找记录
 	fmt.Println("filehash :" + filehash)
 	row, _ := meta.GetFileMetaDB(filehash)
+
+	// 根据location的前缀，判断文件下载的来源
+	//本地/ceph集群/aliyun oss
 	if strings.HasPrefix(row.Location, "/tmp") {
 		username := r.Form.Get("username")
 		token := r.Form.Get("token")
 		tmpUrl := fmt.Sprintf("http://%s/file/download?filehash=%s&username=%s&token=%s",
 			r.Host, filehash, username, token)
 		w.Write([]byte(tmpUrl))
+	} else if strings.HasPrefix(row.Location, "oss") {
+		signedURL := oss.DownloadURL(row.Location)
+		w.Write([]byte(signedURL))
 	}
+	return
 }
 
 
