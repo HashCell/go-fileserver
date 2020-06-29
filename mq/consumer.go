@@ -4,12 +4,13 @@ import "fmt"
 
 var processDone chan bool
 
-func StartConsumer(queueName, consumerName string, callback func(msg[]byte)bool) {
+//StartConsumer 开始消费
+func StartConsumer(queueName, consumerName string, callback func(msg []byte) bool) {
 	//1. 获取消费者通信通道
 	msgChan, err := channel.Consume(
 		queueName,
 		consumerName,
-		true,	//自动应答
+		true,  //自动应答
 		false, //多个消费者
 		false,
 		false,
@@ -39,6 +40,5 @@ func StartConsumer(queueName, consumerName string, callback func(msg[]byte)bool)
 
 	//有消息过来就close掉rabbit通道
 	channel.Close()
-
 
 }

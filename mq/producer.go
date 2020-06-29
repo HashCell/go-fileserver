@@ -1,15 +1,20 @@
 package mq
 
 import (
-	"github.com/streadway/amqp"
-	"github.com/HashCell/go-fileserver/config"
 	"fmt"
+	"log"
+
+	"github.com/HashCell/go-fileserver/config"
+	"github.com/streadway/amqp"
 )
 
 //rabbitmq服务的连接
 var conn *amqp.Connection
+
 //与rabbitmq服务通信的通道
 var channel *amqp.Channel
+
+var notifyClose chan *amqp.Error
 
 func init() {
 	//没有开启异步转移，仅当开启时才初始化rabbitMQ连接
@@ -17,9 +22,20 @@ func init() {
 		return
 	}
 	if initChannel() {
-
-
+		channel.NotifyClose(notifyClose)
 	}
+
+	go func() {
+		for {
+			select {
+			case msg := <-notifyClose:
+				conn = nil
+				channel = nil
+				log.Printf("on notify channel closed: %+v\n", msg)
+				initChannel()
+			}
+		}
+	}()
 }
 
 // 初始化channel
@@ -44,7 +60,7 @@ func initChannel() bool {
 	return true
 }
 
-//生产者发布消息
+//Publish 生产者发布消息
 func Publish(exchanger string, routingKey string, msg []byte) bool {
 	//1. 判断channel是否正常
 	if !initChannel() {
@@ -57,8 +73,8 @@ func Publish(exchanger string, routingKey string, msg []byte) bool {
 		false,
 		false,
 		amqp.Publishing{
-			ContentType:"text/plain",
-			Body:msg,
+			ContentType: "text/plain",
+			Body:        msg,
 		},
 	)
 
@@ -68,5 +84,3 @@ func Publish(exchanger string, routingKey string, msg []byte) bool {
 	}
 	return true
 }
-
-

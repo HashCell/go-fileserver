@@ -1,12 +1,13 @@
 package db
 
 import (
-	mydb "github.com/HashCell/go-fileserver/db/mysql"
-	"fmt"
 	"database/sql"
+	"fmt"
+
+	mydb "github.com/HashCell/go-fileserver/db/mysql"
 )
 
-
+//TableFile 结构体
 type TableFile struct {
 	FileHash string
 	FileName sql.NullString
@@ -14,7 +15,7 @@ type TableFile struct {
 	FileAddr sql.NullString
 }
 
-// finished to upload file then store file meta to database
+// OnFileUploadFinished finished to upload file then store file meta to database
 func OnFileUploadFinished(filehash string, filename string, filesize int64, fileaddr string) bool {
 	stmt, err := mydb.DBConn().Prepare(
 		"insert ignore into tbl_file (`file_sha1`,`file_name`,`file_size`," +
@@ -27,7 +28,7 @@ func OnFileUploadFinished(filehash string, filename string, filesize int64, file
 
 	defer stmt.Close()
 
-	ret, err := stmt.Exec(filehash, filename, filesize, fileaddr,1)
+	ret, err := stmt.Exec(filehash, filename, filesize, fileaddr, 1)
 	if err != nil {
 		fmt.Printf("fail to exe statement, err: %s\n", err.Error())
 		return false
@@ -43,6 +44,7 @@ func OnFileUploadFinished(filehash string, filename string, filesize int64, file
 	return false
 }
 
+//GetFileMeta 获取file meta
 func GetFileMeta(filehash string) (*TableFile, error) {
 	stmt, err := mydb.DBConn().Prepare(
 		"select file_sha1,file_addr,file_name,file_size " +
@@ -66,13 +68,14 @@ func GetFileMeta(filehash string) (*TableFile, error) {
 	return &tableFile, nil
 }
 
+// GetFileMetaList 获取file meta list
 func GetFileMetaList(limit int) ([]TableFile, error) {
 	stmt, err := mydb.DBConn().Prepare(
 		"select file_sha1,file_name,file_size,file_addr from tbl_file" +
 			" where status=1 limit ?")
 	if err != nil {
 		fmt.Println(err.Error())
-		return nil,err
+		return nil, err
 	}
 
 	defer stmt.Close()
@@ -87,7 +90,7 @@ func GetFileMetaList(limit int) ([]TableFile, error) {
 	var resultFiles []TableFile
 	for i := 0; i < len(values) && rows.Next(); i++ {
 		tFile := TableFile{}
-		err = rows.Scan(&tFile.FileHash,&tFile.FileName,&tFile.FileSize,&tFile.FileAddr)
+		err = rows.Scan(&tFile.FileHash, &tFile.FileName, &tFile.FileSize, &tFile.FileAddr)
 		if err != nil {
 			fmt.Println(err.Error())
 			break
@@ -97,8 +100,7 @@ func GetFileMetaList(limit int) ([]TableFile, error) {
 	return resultFiles, nil
 }
 
-
-//更新文件存储位置
+//UpdateFileLocation 更新文件存储位置用于ceph或oss存储后
 func UpdateFileLocation(filehash string, fileaddr string) bool {
 	stmt, err := mydb.DBConn().Prepare(
 		"update tbl_file set `file_addr`=? where `file_sha1`=? limit 1")
@@ -117,10 +119,9 @@ func UpdateFileLocation(filehash string, fileaddr string) bool {
 
 	if rf, err := ret.RowsAffected(); nil == err {
 		if rf == 0 {
-			fmt.Printf("fail to update file location, filesha1 %s\n", filehash)
+			fmt.Printf("文件 %s 已存在,无法更新\n", filehash)
 		}
 		return true
 	}
 	return false
 }
-

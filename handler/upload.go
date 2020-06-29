@@ -1,24 +1,29 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
-	"fmt"
-	"github.com/HashCell/go-fileserver/meta"
-	"time"
 	"os"
-	"github.com/HashCell/go-fileserver/util"
-	"encoding/json"
 	"strconv"
-	"github.com/HashCell/go-fileserver/db"
 	"strings"
+	"time"
+
+	"github.com/HashCell/go-fileserver/mq"
+
+	"github.com/HashCell/go-fileserver/common"
+	"github.com/HashCell/go-fileserver/config"
+	"github.com/HashCell/go-fileserver/db"
+	"github.com/HashCell/go-fileserver/meta"
+	"github.com/HashCell/go-fileserver/store/ceph"
 	"github.com/HashCell/go-fileserver/store/oss"
+	"github.com/HashCell/go-fileserver/util"
 )
 
-/**
-* update file meta, only support rename file
- */
+// UpdateFileMetaHandler 更新file meta
 func UpdateFileMetaHandler(w http.ResponseWriter, r *http.Request) {
 	// fetch file hash-key to find file-meta
 	r.ParseForm()
@@ -50,6 +55,7 @@ func UpdateFileMetaHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+//GetFileMetaHandler 获取file meta
 func GetFileMetaHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 
@@ -60,7 +66,7 @@ func GetFileMetaHandler(w http.ResponseWriter, r *http.Request) {
 	//fMeta := meta.GetFileMeta(fileSha1)
 
 	// change to use mysql for query 2020.05.01 begin
-	tableFile,err := meta.GetFileMetaDB(fileSha1)
+	tableFile, err := meta.GetFileMetaDB(fileSha1)
 	fmt.Println(tableFile)
 	if err != nil {
 		fmt.Printf("fail to get file meta, err %s\n", err.Error())
@@ -77,10 +83,10 @@ func GetFileMetaHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// query recent file metas
-func QueryFileMetaHanler( w http.ResponseWriter, r *http.Request) {
+//QueryFileMetaHanler query recent file metas
+func QueryFileMetaHanler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
-	limitCnt,_ := strconv.Atoi(r.Form.Get("limit"))
+	limitCnt, _ := strconv.Atoi(r.Form.Get("limit"))
 	//fileMetas := meta.GetLastFileMetas(limitCnt)
 
 	fileMetas, err := meta.GetLastFileMetasDB(limitCnt)
@@ -98,6 +104,7 @@ func QueryFileMetaHanler( w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+//DeleteFileHandler 删除文件
 func DeleteFileHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 
@@ -117,11 +124,13 @@ func DeleteFileHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+//UploadHandler 文件上传
 func UploadHandler(w http.ResponseWriter, req *http.Request) {
 
 	// if get method, then return uploading-page
 	if req.Method == "GET" {
-		data, err := ioutil.ReadFile("./static/view/index.html")
+		log.Println(config.WebRoot + "/static/view/index.html")
+		data, err := ioutil.ReadFile(config.GetWebRoot() + "/static/view/index.html")
 		if err != nil {
 			io.WriteString(w, "internal server error")
 			return
@@ -159,38 +168,62 @@ func UploadHandler(w http.ResponseWriter, req *http.Request) {
 		}
 
 		//compute file sha1
-		newFile.Seek(0,0)
+		newFile.Seek(0, 0)
 		// save the file meta
 		fileMeta.FileSha1 = util.FileSha1(newFile)
 		//meta.UpdateFileMeta(fileMeta)
 
-		newFile.Seek(0,0)
-		//data, _ := ioutil.ReadAll(newFile)
-		////写入到ceph集群
-		//bucket := ceph.GetCephBucket("userfile")
-		//cephPath := "/ceph/" + fileMeta.FileSha1
-		//bucket.Put(cephPath,data,"octet-stream",s3.PublicRead)
-		//fileMeta.Location = cephPath
+		newFile.Seek(0, 0)
 
-		// 上传到阿里云oss
-		//为了方便在阿里云预览文件，将文件名带上从而带上具体文件格式
-		// ossPath中的文件路径将会在阿里云oss创建，path不要以 / 开头
-		ossPath := "oss/" + fileMeta.FileSha1 + "_" + fileMeta.FileName
-		err = oss.Bucket().PutObject(ossPath, newFile)
-		if err != nil {
-			fmt.Println(err.Error())
-			w.Write([]byte("oss upload fail"))
-			return
+		if config.CurrentStoreType == common.StoreCeph {
+			data, _ := ioutil.ReadAll(newFile)
+			cephPath := "/ceph/" + fileMeta.FileSha1
+			_ = ceph.PutObject("userfile", cephPath, data)
+			fileMeta.Location = cephPath
+		} else if config.CurrentStoreType == common.StoreOSS {
+			// 上传到阿里云oss
+			//为了方便在阿里云预览文件，将文件名带上从而带上具体文件格式
+			// ossPath中的文件路径将会在阿里云oss创建，path不要以 / 开头
+			ossPath := "oss/" + fileMeta.FileSha1 + "_" + fileMeta.FileName
+
+			//判断是使用同步还是异步，异步则使用rabbitmq
+			if !config.AsyncTransferEnable {
+				err = oss.Bucket().PutObject(ossPath, newFile)
+				if err != nil {
+					fmt.Println(err.Error())
+					w.Write([]byte("oss upload fail"))
+					return
+				}
+				fileMeta.Location = ossPath
+			} else {
+				//写入rabbitmq异步转移队列
+				data := mq.TransferData{
+					Filehash:      fileMeta.FileSha1,
+					CurLocation:   fileMeta.Location,
+					DestLocation:  ossPath,
+					DestStoreType: common.StoreOSS,
+				}
+
+				publishData, _ := json.Marshal(data)
+				isSuc := mq.Publish(
+					config.TransExchangeName,
+					config.TransOSSRoutingKey,
+					publishData)
+				if !isSuc {
+					log.Println("转移到异步队列失败")
+				}
+			}
 		}
-		fileMeta.Location = ossPath
 
-		// 写入到文件表
-		meta.UpdateFileMetaDB(fileMeta)
+		// 更新文件表
+		_ = meta.UpdateFileMetaDB(fileMeta)
+
 		//由于引入了秒传功能，所以还需要更新用户文件表
 		req.ParseForm()
 		username := req.Form.Get("username")
-		suc := db.OnUserFileUploadFinished(username,fileMeta.FileSha1,
-			fileMeta.FileName,fileMeta.FileSize)
+		suc := db.OnUserFileUploadFinished(username, fileMeta.FileSha1,
+			fileMeta.FileName, fileMeta.FileSize)
+
 		if suc {
 			http.Redirect(w, req, "/static/view/home.html", http.StatusFound)
 		} else {
@@ -199,19 +232,19 @@ func UploadHandler(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// when upload successfully, redirect to this handler to response to client
-func UploadSucHandler(w http.ResponseWriter, r* http.Request) {
+//UploadSucHandler 上传成功后则重定向
+func UploadSucHandler(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "upload file successfully!")
 }
 
-
+//DownloadHandler 获取下载url
 func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	// r.Form is a type of map
 	filesha1 := r.Form.Get("filehash")
 	// find file meta according to filesha1
 	fmt.Println("filesha1: " + filesha1)
-	fileMeta,_ := meta.GetFileMetaDB(filesha1)
+	fileMeta, _ := meta.GetFileMetaDB(filesha1)
 	// read file from file system, os.Open() is just used for reading
 	f, err := os.Open(fileMeta.Location)
 	if err != nil {
@@ -231,11 +264,11 @@ func DownloadHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/octect-stream")
 	// attachment means the file will be downloaded to save, instead of displaying on browser
-	w.Header().Set("content-disposition","attachment;filename=\""+fileMeta.FileName+"\"")
+	w.Header().Set("content-disposition", "attachment;filename=\""+fileMeta.FileName+"\"")
 	w.Write(data)
 }
 
-//DownloadURLHandler：生成文件下载地址，为了向后兼容oss或ceph云存储
+//DownloadURLHandler 生成文件下载地址，为了向后兼容oss或ceph云存储
 func DownloadURLHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	filehash := r.Form.Get("filehash")
@@ -248,9 +281,9 @@ func DownloadURLHandler(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(row.Location, "/tmp") {
 		username := r.Form.Get("username")
 		token := r.Form.Get("token")
-		tmpUrl := fmt.Sprintf("http://%s/file/download?filehash=%s&username=%s&token=%s",
+		tmpURL := fmt.Sprintf("http://%s/file/download?filehash=%s&username=%s&token=%s",
 			r.Host, filehash, username, token)
-		w.Write([]byte(tmpUrl))
+		w.Write([]byte(tmpURL))
 	} else if strings.HasPrefix(row.Location, "oss") {
 		signedURL := oss.DownloadURL(row.Location)
 		w.Write([]byte(signedURL))
@@ -258,15 +291,14 @@ func DownloadURLHandler(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-
-// 实现秒传接口
+// TryFastUploadHandler 实现秒传接口
 func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
 	//1. 解析请求参数
 	r.ParseForm()
 	username := r.Form.Get("username")
 	filehash := r.Form.Get("filehash")
 	filename := r.Form.Get("filename")
-	filesize,_ := strconv.Atoi(r.Form.Get("filesize"))
+	filesize, _ := strconv.Atoi(r.Form.Get("filesize"))
 	//2.　从文件表中查询是否有相同hash的文件记录
 	fileMeta, err := meta.GetFileMetaDB(filehash)
 	if err != nil {
@@ -277,31 +309,32 @@ func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
 	//3. 查不到记录就返回秒传失败
 	if fileMeta == nil {
 		resp := util.RespMsg{
-			Code:-1,
-			Msg:"秒传失败，请访问普通上传接口",
+			Code: -1,
+			Msg:  "秒传失败，请访问普通上传接口",
 		}
 		w.Write(resp.JSONBytes())
 		return
 	}
 	//4. 否则通过秒传讲文件信息写入到用户文件表，返回成功
-	suc := db.OnUserFileUploadFinished(username,filehash,filename,int64(filesize))
+	suc := db.OnUserFileUploadFinished(username, filehash, filename, int64(filesize))
 	if suc {
 		resp := util.RespMsg{
-			Code:0,
-			Msg:"秒传成功",
+			Code: 0,
+			Msg:  "秒传成功",
 		}
 		w.Write(resp.JSONBytes())
 		return
 	}
 	//可能出现数据库写入失败
 	resp := util.RespMsg{
-		Code:-2,
-		Msg:"秒传失败,请稍后重试",
+		Code: -2,
+		Msg:  "秒传失败,请稍后重试",
 	}
 	w.Write(resp.JSONBytes())
 	return
 }
 
+//FileQueryHandler 文件查询
 func FileQueryHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	limitCnt, _ := strconv.Atoi(r.Form.Get("limit"))
