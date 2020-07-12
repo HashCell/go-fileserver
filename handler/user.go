@@ -39,13 +39,15 @@ func DoPostUserSignupHandler(c *gin.Context) {
 	res := db.UserSignup(username, encPwd)
 	if res {
 		c.JSON(http.StatusOK, gin.H{
+			"code": 0,
 			"msg":  "signup success",
-			"code": 1,
+			"data": nil,
 		})
 	} else {
 		c.JSON(http.StatusOK, gin.H{
+			"code": 0,
 			"msg":  "signup fail",
-			"code": -2,
+			"data": nil,
 		})
 	}
 	return
@@ -66,9 +68,10 @@ func DoPostUserSigninHandler(c *gin.Context) {
 	encPwd := util.Sha1([]byte(password + pwdSalt))
 	pwdChecked := db.UserSignIn(username, encPwd)
 	if !pwdChecked {
+		println("sign in fail")
 		c.JSON(http.StatusOK, gin.H{
 			"msg":  "signin fail",
-			"code": -1,
+			"code": 0,
 		})
 		return
 	}
@@ -77,9 +80,10 @@ func DoPostUserSigninHandler(c *gin.Context) {
 	token := GenToken(username)
 	upRes := db.UpdateToken(username, token)
 	if !upRes {
+		println("update token fail")
 		c.JSON(http.StatusOK, gin.H{
 			"msg":  "signin fail",
-			"code": -2,
+			"code": 0,
 		})
 		return
 	}
@@ -98,7 +102,8 @@ func DoPostUserSigninHandler(c *gin.Context) {
 			Token:    token,
 		},
 	}
-	c.Data(http.StatusOK, "application/json", resp.JSONBytes())
+	c.String(http.StatusOK, string(resp.JSONBytes()))
+	//c.Data(http.StatusOK, "octet-stream", resp.JSONBytes())
 	return
 }
 
@@ -125,6 +130,6 @@ func DoGetUserInfoHandler(c *gin.Context) {
 		Data: user,
 	}
 
-	c.Data(http.StatusOK, "application/json", resp.JSONBytes())
+	c.Data(http.StatusOK, "application/octet-stream", resp.JSONBytes())
 	return
 }

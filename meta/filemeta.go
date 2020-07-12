@@ -3,6 +3,7 @@ package meta
 import (
 	"fmt"
 	"sort"
+
 	"github.com/HashCell/go-fileserver/db"
 )
 
@@ -14,9 +15,9 @@ type FileMeta struct {
 	FileSize int64
 }
 
-var fileMetas map[string] FileMeta
+var fileMetas map[string]FileMeta
 
-func init()  {
+func init() {
 	fileMetas = make(map[string]FileMeta)
 }
 
@@ -30,8 +31,8 @@ func UpdateFileMeta(fmeta FileMeta) {
 	fmt.Printf("file meta: %v\n", fmeta)
 }
 
-// store into database
-func UpdateFileMetaDB(fmete FileMeta) bool {
+// UpdateFileMetaDB store into database
+func UpdateFileMetaDB(fmete *FileMeta) bool {
 	return db.OnFileUploadFinished(
 		fmete.FileSha1, fmete.FileName, fmete.FileSize, fmete.Location)
 }
@@ -43,22 +44,23 @@ func GetFileMeta(fileSha1 string) FileMeta {
 
 func GetFileMetaDB(filesha1 string) (*FileMeta, error) {
 	tableFile, err := db.GetFileMeta(filesha1)
-	if err != nil || tableFile == nil{
-		return nil,err
+	if err != nil || tableFile == nil {
+		return nil, err
 	}
 
 	var fileMeta = FileMeta{
-		FileSha1:tableFile.FileHash,
-		FileSize:tableFile.FileSize.Int64,
-		FileName:tableFile.FileName.String,
-		Location:tableFile.FileAddr.String,
+		FileSha1: tableFile.FileHash,
+		FileSize: tableFile.FileSize.Int64,
+		FileName: tableFile.FileName.String,
+		Location: tableFile.FileAddr.String,
 	}
 	fmt.Println(fileMeta)
-	return &fileMeta,nil
+	return &fileMeta, nil
 }
+
 // remove file meta
-func RemoveFileMeta(fileSha1 string)  {
-	delete(fileMetas,fileSha1)
+func RemoveFileMeta(fileSha1 string) {
+	delete(fileMetas, fileSha1)
 }
 
 func GetLastFileMetas(count int) []FileMeta {
@@ -76,19 +78,18 @@ func GetLastFileMetasDB(limit int) ([]FileMeta, error) {
 
 	tfiles, err := db.GetFileMetaList(limit)
 	if err != nil {
-		return make([]FileMeta,0), err
+		return make([]FileMeta, 0), err
 	}
 
 	resultFiles := make([]FileMeta, len(tfiles))
 	for i := 0; i < len(tfiles); i++ {
 		resultFiles[i] = FileMeta{
-			FileSha1:tfiles[i].FileHash,
-			FileName:tfiles[i].FileName.String,
-			FileSize:tfiles[i].FileSize.Int64,
-			Location:tfiles[i].FileAddr.String,
+			FileSha1: tfiles[i].FileHash,
+			FileName: tfiles[i].FileName.String,
+			FileSize: tfiles[i].FileSize.Int64,
+			Location: tfiles[i].FileAddr.String,
 		}
 	}
 
 	return resultFiles, nil
 }
-

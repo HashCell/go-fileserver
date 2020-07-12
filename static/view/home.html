@@ -104,12 +104,15 @@
         if (!body) {
           return;
         }
-        var data = JSON.parse(body);
+        console.log(body)
+        // var data = JSON.parse(JSON.stringify(body));
+        var data = body;
         if (!data || data.length <= 0) {
           return;
         }
 
         for (var i = 0; i < data.length; i++) {
+          console.log(data[i])
           var x = document.getElementById('filetbl').insertRow();
           var cell = x.insertCell();
           cell.innerHTML = data[i].FileHash.substr(0, 20)+"...";
