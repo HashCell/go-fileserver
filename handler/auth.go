@@ -1,26 +1,29 @@
 package handler
 
 import (
-	"net/http"
 	"fmt"
+	"net/http"
 	"time"
+
 	"github.com/HashCell/go-fileserver/util"
+	"github.com/gin-gonic/gin"
 )
 
-func HttpInterceptor(h http.HandlerFunc) http.HandlerFunc {
+//HTTPInterceptor 拦截器
+func HTTPInterceptor() gin.HandlerFunc {
 	//convert the func(w,r) to http.HandlerFunc
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			r.ParseForm()
-			username := r.Form.Get("username")
-			token := r.Form.Get("token")
-			
-			if len(username) < 3 || !IsTokenValid(token) {
-				http.Redirect(w, r, "/static/view/signin.html", http.StatusFound)
-				return
-			}
-			h(w,r)
-		})
+	return func(c *gin.Context) {
+		username := c.Request.FormValue("username")
+		token := c.Request.FormValue("token")
+
+		if len(username) < 3 || !IsTokenValid(token) {
+			c.Abort() // 终止传递
+			resp := util.NewRespMsg(-4, "token无效", nil)
+			c.JSON(http.StatusOK, resp)
+			return
+		}
+		c.Next()
+	}
 }
 
 // GenToken : 生成token

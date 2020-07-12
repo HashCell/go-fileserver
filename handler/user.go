@@ -1,59 +1,75 @@
 package handler
 
 import (
-	"net/http"
 	"fmt"
-	"github.com/HashCell/go-fileserver/util"
+	"net/http"
+
 	"github.com/HashCell/go-fileserver/db"
+	"github.com/HashCell/go-fileserver/util"
+	"github.com/gin-gonic/gin"
 )
+
 const (
 	//自定义加密盐值
 	pwdSalt = "*#890"
 )
 
-// 用户注册
-func UserSignupHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		http.Redirect(w,r,"/static/view/signup.html", http.StatusFound)
-	}
-	//1. 获取用户账户密码＋简单校验
-	r.ParseForm()
-	username := r.Form.Get("username")
-	password := r.Form.Get("password")
-	fmt.Println(username +":"+password)
+//DoGetUserSignupHandler 用户注册
+func DoGetUserSignupHandler(c *gin.Context) {
+	c.Redirect(http.StatusFound, "/static/view/signup.html")
+}
 
-	if len(username) < 3 || len(password) < 3 {
-		w.Write([]byte("Invalid parameter"))
+//DoPostUserSignupHandler 用户注册
+func DoPostUserSignupHandler(c *gin.Context) {
+
+	username := c.Request.FormValue("username")
+	passwd := c.Request.FormValue("password")
+
+	//TODO 定义code枚举
+	if len(username) < 3 || len(passwd) < 3 {
+		c.JSON(http.StatusOK, gin.H{
+			"msg":  "invalid parameter",
+			"code": -1,
+		})
 		return
 	}
 	//2. 对用户密码进行加密
-	encPwd := util.Sha1([]byte(password+pwdSalt))
+	encPwd := util.Sha1([]byte(passwd + pwdSalt))
 	//3. 将用户信息保存到数据库表
 	res := db.UserSignup(username, encPwd)
 	if res {
-		w.Write([]byte("SUCCESS"))
+		c.JSON(http.StatusOK, gin.H{
+			"msg":  "signup success",
+			"code": 1,
+		})
 	} else {
-		w.Write([]byte("sign up fail!"))
+		c.JSON(http.StatusOK, gin.H{
+			"msg":  "signup fail",
+			"code": -2,
+		})
 	}
+	return
 }
 
-//　用户登录
-func UserSigninHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		http.Redirect(w, r, "/static/view/signin.html",http.StatusFound)
-		return
-	}
+//DoGetUserSigninHandler 获取登录界面
+func DoGetUserSigninHandler(c *gin.Context) {
+	c.Redirect(http.StatusFound, "/static/view/signin.html")
+}
 
-	r.ParseForm()
-	username := r.Form.Get("username")
-	password := r.Form.Get("password")
+//DoPostUserSigninHandler 用户登录
+func DoPostUserSigninHandler(c *gin.Context) {
+	username := c.Request.FormValue("username")
+	password := c.Request.FormValue("password")
 
-	println(username+":"+password)
+	println(username + ":" + password)
 	//1.用户名和密码校验
-	encPwd := util.Sha1([]byte(password+pwdSalt))
+	encPwd := util.Sha1([]byte(password + pwdSalt))
 	pwdChecked := db.UserSignIn(username, encPwd)
 	if !pwdChecked {
-		w.Write([]byte("sign in fail, username or password invalid"))
+		c.JSON(http.StatusOK, gin.H{
+			"msg":  "signin fail",
+			"code": -1,
+		})
 		return
 	}
 
@@ -61,51 +77,54 @@ func UserSigninHandler(w http.ResponseWriter, r *http.Request) {
 	token := GenToken(username)
 	upRes := db.UpdateToken(username, token)
 	if !upRes {
-		w.Write([]byte("fail to update token"))
+		c.JSON(http.StatusOK, gin.H{
+			"msg":  "signin fail",
+			"code": -2,
+		})
 		return
 	}
 
 	//TODO: return response message
 	resp := util.RespMsg{
-		Code:0,
-		Msg:"OK",
+		Code: 0,
+		Msg:  "OK",
 		Data: struct {
 			Location string
 			Username string
-			Token string
+			Token    string
 		}{
-			Location:"http://" + r.Host + "/static/view/home.html",
-			Username:username,
-			Token:token,
+			Location: "/static/view/home.html",
+			Username: username,
+			Token:    token,
 		},
 	}
-	w.Write(resp.JSONBytes())
+	c.Data(http.StatusOK, "application/json", resp.JSONBytes())
+	return
 }
 
-func UserInfoHandler(w http.ResponseWriter, r *http.Request) {
+//DoGetUserInfoHandler 获取用户信息
+func DoGetUserInfoHandler(c *gin.Context) {
 	//1.解析请求参数
-	r.ParseForm()
-	username := r.Form.Get("username")
-	token := r.Form.Get("token")
+	username := c.Request.FormValue("username")
+	token := c.Request.FormValue("token")
 	//2.验证token是否合法
 	if !IsTokenValid(token) {
-		w.WriteHeader(http.StatusForbidden)
+		c.JSON(http.StatusForbidden, gin.H{})
 		return
 	}
 	user, err := db.GetUserInfo(username)
 	fmt.Println(user)
 	if err != nil {
-		w.WriteHeader(http.StatusForbidden)
+		c.JSON(http.StatusForbidden, gin.H{})
 		return
 	}
 
 	resp := util.RespMsg{
-		Code:0,
-		Msg:"OK",
-		Data:user,
+		Code: 0,
+		Msg:  "OK",
+		Data: user,
 	}
 
-	w.Write(resp.JSONBytes())
+	c.Data(http.StatusOK, "application/json", resp.JSONBytes())
+	return
 }
-
-
